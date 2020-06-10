@@ -17,7 +17,7 @@
 #include "postgres.h"
 #include "cstore_fdw.h"
 #include "cstore_version_compat.h"
-
+#include <sqlite3.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <limits.h>
@@ -196,6 +196,33 @@ void _PG_fini(void)
 }
 
 
+void InsertRelationId(int relationId)
+{
+	sqlite3 *db;
+	int db_exec;
+	char *err_msg = 0;
+	char str[10];
+	char sql[100] = "insert into Counter values(";
+
+	db_exec = sqlite3_open("test.db", &db);
+
+	sprintf(str, "%d", relationId);
+	strcat(sql, str);
+	strcat(sql, ",0,0)");
+
+	db_exec = sqlite3_exec(db, sql, 0, 0, &err_msg);
+
+	if (db_exec != SQLITE_OK)
+	{
+		printf("Cannot open database: %s\n", sqlite3_errmsg(db));
+		sqlite3_close(db);
+	}
+
+	sqlite3_close(db);
+}
+
+
+
 /*
  * cstore_ddl_event_end_trigger is the event trigger function which is called on
  * ddl_command_end event. This function creates required directories after the
@@ -250,6 +277,7 @@ cstore_ddl_event_end_trigger(PG_FUNCTION_ARGS)
 			CreateCStoreDatabaseDirectory(MyDatabaseId);
 
 			InitializeCStoreTableFile(relationId, relation);
+			InsertRelationId(relationId);
 			heap_close(relation, AccessExclusiveLock);
 		}
 	}
@@ -1114,11 +1142,41 @@ DirectoryExists(StringInfo directoryName)
 }
 
 
+void OpenSQLiteConnection()
+{
+	sqlite3 *db;
+	int result;
+	char *sql;
+	char *err_msg = 0;
+
+	result = sqlite3_open("test.db", &db);
+
+	sql = "DROP TABLE IF EXISTS Counter;"
+		  "CREATE TABLE Counter(relationID  INT,"
+		  "insertQuery INT,"
+		  "selectQuery  INT)";
+
+	result = sqlite3_exec(db, sql, 0, 0, &err_msg);
+
+	if (result != SQLITE_OK)
+	{
+		printf("Cannot open database: %s\n", sqlite3_errmsg(db));
+		sqlite3_close(db);
+	}
+	sqlite3_close(db);
+	
+}
+
+
+
 /* CreateDirectory creates a new directory with the given directory name. */
 static void
 CreateDirectory(StringInfo directoryName)
 {
 	int makeOK = mkdir(directoryName->data, S_IRWXU);
+
+	OpenSQLiteConnection();
+
 	if (makeOK != 0)
 	{
 		ereport(ERROR, (errcode_for_file_access(),
@@ -1941,6 +1999,33 @@ CStoreExplainForeignScan(ForeignScanState *scanState, ExplainState *explainState
 }
 
 
+void UpdateSelectCount(int foreignTableId)
+{
+	sqlite3 *db;
+	char str[10];
+	char sql[100] = "update Counter set selectQuery = selectQuery + 1";
+	int db_exec;
+	char *err_msg;
+
+	db_exec = sqlite3_open("test.db", &db);
+
+	sprintf(str, "%d", foreignTableId);
+	strcat(sql, " where relationID = ");
+	strcat(sql, str);
+	strcat(sql, ";");
+
+	db_exec = sqlite3_exec(db, sql, 0, 0, &err_msg);
+
+	if (db_exec != SQLITE_OK)
+	{
+		printf("Cannot open database: %s\n", sqlite3_errmsg(db));
+		sqlite3_close(db);
+	}
+
+	sqlite3_close(db);
+}
+
+
 /* CStoreBeginForeignScan starts reading the underlying cstore file. */
 static void
 CStoreBeginForeignScan(ForeignScanState *scanState, int executorFlags)
@@ -1971,7 +2056,7 @@ CStoreBeginForeignScan(ForeignScanState *scanState, int executorFlags)
 	columnList = (List *) linitial(foreignPrivateList);
 	readState = CStoreBeginRead(cstoreFdwOptions->filename, tupleDescriptor,
 								columnList, whereClauseList);
-
+	UpdateSelectCount(foreignTableId);
 	scanState->fdw_state = (void *) readState;
 }
 
