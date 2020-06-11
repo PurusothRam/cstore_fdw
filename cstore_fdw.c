@@ -641,7 +641,6 @@ CopyIntoCStoreTable(const CopyStmt *copyStatement, const char *queryString)
 	EndCopyFrom(copyState);
 	CStoreEndWrite(writeState);
 	heap_close(relation, ShareUpdateExclusiveLock);
-    UpdateInsertCount(relationId);
 	return processedRowCount;
 }
 
@@ -2386,6 +2385,7 @@ CStoreBeginForeignModify(ModifyTableState *modifyTableState,
 
 	CStoreBeginForeignInsert(modifyTableState, relationInfo);
 }
+
 
 void UpdateInsertCount(int foreignTableId)
 {
