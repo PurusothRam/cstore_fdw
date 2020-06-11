@@ -641,7 +641,7 @@ CopyIntoCStoreTable(const CopyStmt *copyStatement, const char *queryString)
 	EndCopyFrom(copyState);
 	CStoreEndWrite(writeState);
 	heap_close(relation, ShareUpdateExclusiveLock);
-
+    UpdateInsertCount(relationId);
 	return processedRowCount;
 }
 
@@ -2387,6 +2387,32 @@ CStoreBeginForeignModify(ModifyTableState *modifyTableState,
 	CStoreBeginForeignInsert(modifyTableState, relationInfo);
 }
 
+void UpdateInsertCount(int foreignTableId)
+{
+    sqlite3 *db;
+	char str[10];
+	char sql[100] = "update Counter set insertQuery = insertQuery + 1";
+	int db_exec;
+	char *err_msg;
+
+	db_exec = sqlite3_open("test.db", &db);
+
+	sprintf(str, "%d", foreignTableId);
+	strcat(sql, " where relationID = ");
+	strcat(sql, str);
+	strcat(sql, ";");
+
+	db_exec = sqlite3_exec(db, sql, 0, 0, &err_msg);
+
+	if (db_exec != SQLITE_OK)
+	{
+		printf("Cannot open database: %s\n", sqlite3_errmsg(db));
+		sqlite3_close(db);
+	}
+
+	sqlite3_close(db);	
+}
+
 
 /*
  * CStoreBeginForeignInsert prepares a cstore table for an insert or rows
@@ -2411,7 +2437,7 @@ CStoreBeginForeignInsert(ModifyTableState *modifyTableState, ResultRelInfo *rela
 								  cstoreFdwOptions->stripeRowCount,
 								  cstoreFdwOptions->blockRowCount,
 								  tupleDescriptor);
-
+	UpdateInsertCount(foreignTableOid);
 	writeState->relation = relation;
 	relationInfo->ri_FdwState = (void *) writeState;
 }
