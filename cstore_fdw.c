@@ -202,7 +202,7 @@ void InsertRelationId(int relationId)
 	int db_exec;
 	char *err_msg = 0;
 	char str[10];
-	char sql[100] = "insert into Counter values(";
+	char sql[100] = "INSERT INTO Counter VALUES(";
 
 	db_exec = sqlite3_open("test.db", &db);
 
@@ -2002,7 +2002,7 @@ void UpdateSelectCount(int foreignTableId)
 {
 	sqlite3 *db;
 	char str[10];
-	char sql[100] = "update Counter set selectQuery = selectQuery + 1";
+	char sql[100] = "UPDATE Counter SET selectQuery = selectQuery + 1";
 	int db_exec;
 	char *err_msg;
 
@@ -2055,7 +2055,6 @@ CStoreBeginForeignScan(ForeignScanState *scanState, int executorFlags)
 	columnList = (List *) linitial(foreignPrivateList);
 	readState = CStoreBeginRead(cstoreFdwOptions->filename, tupleDescriptor,
 								columnList, whereClauseList);
-	UpdateSelectCount(foreignTableId);
 	scanState->fdw_state = (void *) readState;
 }
 
@@ -2098,9 +2097,12 @@ static void
 CStoreEndForeignScan(ForeignScanState *scanState)
 {
 	TableReadState *readState = (TableReadState *) scanState->fdw_state;
+	Oid foreignTableId = RelationGetRelid(scanState->ss.ss_currentRelation);
+
 	if (readState != NULL)
 	{
 		CStoreEndRead(readState);
+        UpdateSelectCount(foreignTableId);
 	}
 }
 
@@ -2391,7 +2393,8 @@ void UpdateInsertCount(int foreignTableId)
 {
     sqlite3 *db;
 	char str[10];
-	char sql[100] = "update Counter set insertQuery = insertQuery + 1";
+	char sql[100] = "UPDATE Counter SET insertQuery = insertQuery + 1";
+	
 	int db_exec;
 	char *err_msg;
 
@@ -2437,7 +2440,6 @@ CStoreBeginForeignInsert(ModifyTableState *modifyTableState, ResultRelInfo *rela
 								  cstoreFdwOptions->stripeRowCount,
 								  cstoreFdwOptions->blockRowCount,
 								  tupleDescriptor);
-	UpdateInsertCount(foreignTableOid);
 	writeState->relation = relation;
 	relationInfo->ri_FdwState = (void *) writeState;
 }
@@ -2493,6 +2495,7 @@ static void
 CStoreEndForeignInsert(EState *executorState, ResultRelInfo *relationInfo)
 {
 	TableWriteState *writeState = (TableWriteState*) relationInfo->ri_FdwState;
+	Oid foreignTableOid = RelationGetRelid(relationInfo->ri_RelationDesc);
 
 	/* writeState is NULL during Explain queries */
 	if (writeState != NULL)
@@ -2500,6 +2503,7 @@ CStoreEndForeignInsert(EState *executorState, ResultRelInfo *relationInfo)
 		Relation relation = writeState->relation;
 
 		CStoreEndWrite(writeState);
+		UpdateInsertCount(foreignTableOid);
 		heap_close(relation, ShareUpdateExclusiveLock);
 	}
 }
