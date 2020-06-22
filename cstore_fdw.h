@@ -326,11 +326,11 @@ extern TableWriteState * CStoreBeginWrite(const char *filename,
 										  TupleDesc tupleDescriptor);
 extern void CStoreWriteRow(TableWriteState *state, Datum *columnValues,
 						   bool *columnNulls);
-extern void CStoreEndWrite(TableWriteState * state);
+extern void CStoreEndWrite(TableWriteState * state,int relationId);
 
 /* Function declarations for reading from a cstore file */
 extern TableReadState * CStoreBeginRead(const char *filename, TupleDesc tupleDescriptor,
-										List *projectedColumnList, List *qualConditions);
+										List *projectedColumnList, List *qualConditions, int foreignTableId);
 extern TableFooter * CStoreReadFooter(StringInfo tableFooterFilename);
 extern bool CStoreReadFinished(TableReadState *state);
 extern bool CStoreReadNextRow(TableReadState *state, Datum *columnValues,

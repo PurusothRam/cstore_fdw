@@ -18,7 +18,7 @@
 #include "cstore_fdw.h"
 #include "cstore_metadata_serialization.h"
 #include "cstore_version_compat.h"
-
+#include <sqlite3.h>
 #include <sys/stat.h>
 #include "access/nbtree.h"
 #include "catalog/pg_collation.h"
@@ -63,7 +63,7 @@ static void AppendStripeMetadata(TableFooter *tableFooter,
 static void WriteToFile(FILE *file, void *data, uint32 dataLength);
 static void SyncAndCloseFile(FILE *file);
 static StringInfo CopyStringInfo(StringInfo sourceString);
-
+void UpdateTableFooter(int foreignTableOid, TableWriteState *writeState);
 
 /*
  * CStoreBeginWrite initializes a cstore data load operation and returns a table
@@ -312,6 +312,56 @@ CStoreWriteRow(TableWriteState *writeState, Datum *columnValues, bool *columnNul
 }
 
 
+void 
+UpdateTableFooter(int foreignTableOid, TableWriteState *writeState)
+{
+	sqlite3 *db;
+	int db_exec;
+	char *err_msg = 0;
+	ListCell *stripeMetadataCell = NULL;
+    List *stripeMetadataList = writeState->tableFooter->stripeMetadataList;
+
+    sqlite3_open("test.db", &db);
+
+	foreach(stripeMetadataCell, stripeMetadataList)
+	{
+		char str[10];
+	    char sql[100] = "INSERT INTO TableFooter VALUES(";
+		StripeMetadata *stripeMetadata = lfirst(stripeMetadataCell);
+
+		sprintf(str, "%d", foreignTableOid);
+	    strcat(sql, str);
+        strcat(sql, ",");
+	    sprintf(str, "%ld", stripeMetadata->fileOffset);
+        strcat(sql, str);
+        strcat(sql, ",");
+        sprintf(str, "%ld", stripeMetadata->skipListLength);
+        strcat(sql, str);
+        strcat(sql, ",");
+        sprintf(str, "%ld", stripeMetadata->dataLength);
+        strcat(sql, str);
+        strcat(sql, ",");
+        sprintf(str, "%ld", stripeMetadata->footerLength);
+        strcat(sql, str); 
+        strcat(sql, ",");
+		sprintf(str, "%ld", writeState->tableFooter->blockRowCount);
+        strcat(sql, str);
+		strcat(sql, ");");
+
+		db_exec = sqlite3_exec(db, sql, 0, 0, &err_msg);
+
+		if (db_exec != SQLITE_OK)
+	    {
+		  printf("Cannot open database: %s\n", sqlite3_errmsg(db));
+		  sqlite3_close(db);
+	    }
+
+	}
+
+
+	sqlite3_close(db);
+}
+
 /*
  * CStoreEndWrite finishes a cstore data load operation. If we have an unflushed
  * stripe, we flush it. Then, we sync and close the cstore data file. Last, we
@@ -319,7 +369,7 @@ CStoreWriteRow(TableWriteState *writeState, Datum *columnValues, bool *columnNul
  * file to the original footer file.
  */
 void
-CStoreEndWrite(TableWriteState *writeState)
+CStoreEndWrite(TableWriteState *writeState,int relationId)
 {
 	StringInfo tableFooterFilename = NULL;
 	StringInfo tempTableFooterFileName = NULL;
@@ -345,6 +395,7 @@ CStoreEndWrite(TableWriteState *writeState)
 	appendStringInfo(tempTableFooterFileName, "%s%s", tableFooterFilename->data,
 					 CSTORE_TEMP_FILE_SUFFIX);
 
+    UpdateTableFooter(relationId,writeState);
 	CStoreWriteFooter(tempTableFooterFileName, writeState->tableFooter);
 
 	renameResult = rename(tempTableFooterFileName->data, tableFooterFilename->data);

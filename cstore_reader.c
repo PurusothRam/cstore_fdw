@@ -18,7 +18,7 @@
 #include "cstore_fdw.h"
 #include "cstore_metadata_serialization.h"
 #include "cstore_version_compat.h"
-
+#include <sqlite3.h>
 #include "access/nbtree.h"
 #include "access/skey.h"
 #include "commands/defrem.h"
@@ -91,7 +91,56 @@ static StringInfo ReadFromFile(FILE *file, uint64 offset, uint32 size);
 static void ResetUncompressedBlockData(ColumnBlockData **blockDataArray,
 									   uint32 columnCount);
 static uint64 StripeRowCount(FILE *tableFile, StripeMetadata *stripeMetadata);
+TableFooter *ReadTableFooter(int foreignTableId);
 
+TableFooter *
+ReadTableFooter(int foreignTableId)
+{
+	sqlite3 *db;
+	char sql[150] = "SELECT fileOffset,skipListLength,dataLength,footerLength,blockRowCount FROM TABLEFOOTER WHERE relationID = ?";
+	int db_exec;
+    sqlite3_stmt *res;
+	TableFooter *tableFooter = NULL;
+	List *stripeMetadataList = NIL;
+	int temp;
+
+	sqlite3_open("test.db", &db);
+
+	db_exec = sqlite3_prepare_v2(db, sql, -1, &res, 0);
+
+	if (db_exec == SQLITE_OK) {
+        sqlite3_bind_int(res, 1, foreignTableId);
+    } else {  
+        printf("Failed to execute statement: %s\n", sqlite3_errmsg(db));
+    }
+    
+	int step = sqlite3_step(res); 
+    if (step == SQLITE_ROW) {
+	    StripeMetadata *stripeMetadata = NULL;
+
+		stripeMetadata = palloc0(sizeof(StripeMetadata));
+		stripeMetadata->fileOffset = atoi(sqlite3_column_text(res, 0));
+		stripeMetadata->skipListLength = atoi(sqlite3_column_text(res, 1));
+		stripeMetadata->dataLength = atoi(sqlite3_column_text(res, 2));
+		stripeMetadata->footerLength = atoi(sqlite3_column_text(res,3));
+        temp  = atoi(sqlite3_column_text(res,4));
+		stripeMetadataList = lappend(stripeMetadataList, stripeMetadata);
+    } 
+
+    sqlite3_finalize(res);
+
+	if (db_exec != SQLITE_OK)
+	{
+		printf("Cannot open database: %s\n", sqlite3_errmsg(db));
+		sqlite3_close(db);
+	}
+
+	sqlite3_close(db); 
+	tableFooter = palloc0(sizeof(TableFooter));
+	tableFooter->stripeMetadataList = stripeMetadataList;
+	tableFooter->blockRowCount = temp;
+	return tableFooter;
+}
 
 /*
  * CStoreBeginRead initializes a cstore read operation. This function returns a
@@ -99,7 +148,7 @@ static uint64 StripeRowCount(FILE *tableFile, StripeMetadata *stripeMetadata);
  */
 TableReadState *
 CStoreBeginRead(const char *filename, TupleDesc tupleDescriptor,
-				List *projectedColumnList, List *whereClauseList)
+				List *projectedColumnList, List *whereClauseList,int foreignTableId)
 {
 	TableReadState *readState = NULL;
 	TableFooter *tableFooter = NULL;
@@ -112,7 +161,7 @@ CStoreBeginRead(const char *filename, TupleDesc tupleDescriptor,
 	StringInfo tableFooterFilename = makeStringInfo();
 	appendStringInfo(tableFooterFilename, "%s%s", filename, CSTORE_FOOTER_FILE_SUFFIX);
 
-	tableFooter = CStoreReadFooter(tableFooterFilename);
+	tableFooter = ReadTableFooter(foreignTableId);
 
 	pfree(tableFooterFilename->data);
 	pfree(tableFooterFilename);

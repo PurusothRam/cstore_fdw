@@ -155,6 +155,10 @@ static TupleTableSlot * CStoreExecForeignInsert(EState *executorState,
 												TupleTableSlot *planSlot);
 static void CStoreEndForeignModify(EState *executorState, ResultRelInfo *relationInfo);
 static void CStoreEndForeignInsert(EState *executorState, ResultRelInfo *relationInfo);
+void OpenSQLiteConnection();
+void InsertRelationId(int relationId);
+void UpdateSelectCount(int foreignTableId);
+void UpdateInsertCount(int foreignTableId);
 #if PG_VERSION_NUM >= 90600
 static bool CStoreIsForeignScanParallelSafe(PlannerInfo *root, RelOptInfo *rel,
 											RangeTblEntry *rte);
@@ -639,7 +643,7 @@ CopyIntoCStoreTable(const CopyStmt *copyStatement, const char *queryString)
 
 	/* end read/write sessions and close the relation */
 	EndCopyFrom(copyState);
-	CStoreEndWrite(writeState);
+	CStoreEndWrite(writeState,relationId);
 	heap_close(relation, ShareUpdateExclusiveLock);
 	return processedRowCount;
 }
@@ -947,7 +951,7 @@ static void InitializeCStoreTableFile(Oid relationId, Relation relation)
 	writeState = CStoreBeginWrite(cstoreFdwOptions->filename,
 			cstoreFdwOptions->compressionType, cstoreFdwOptions->stripeRowCount,
 			cstoreFdwOptions->blockRowCount, tupleDescriptor);
-	CStoreEndWrite(writeState);
+	CStoreEndWrite(writeState,relationId);
 }
 
 
@@ -1164,17 +1168,18 @@ void OpenSQLiteConnection()
 	}
 
 	sql = "DROP TABLE IF EXISTS TableFooter;"
-          "CREATE TABLE TableFooter(relationID  INT,"
+          "CREATE TABLE TableFooter(relationID  BIG INT,"
 		  "fileOffset UNSIGNED BIG INT,"
           "skipListLength UNSIGNED BIG INT,"
           "dataLength UNSIGNED BIG INT,"
-          "footerLength UNSIGNED BIG INT)";
+          "footerLength UNSIGNED BIG INT,"
+		  "blockRowCount UNSIGNED BIG INT)";
 
 	result = sqlite3_exec(db, sql, 0, 0, &err_msg);
 
 	if (result != SQLITE_OK)
 	{
-		printf("Cannot open database: %s\n", sqlite3_errmsg(db));
+		printf("Cannot open at open database: %s\n", sqlite3_errmsg(db));
 		sqlite3_close(db);
 	}
 	sqlite3_close(db);
@@ -2068,7 +2073,7 @@ CStoreBeginForeignScan(ForeignScanState *scanState, int executorFlags)
 
 	columnList = (List *) linitial(foreignPrivateList);
 	readState = CStoreBeginRead(cstoreFdwOptions->filename, tupleDescriptor,
-								columnList, whereClauseList);
+								columnList, whereClauseList,foreignTableId);
 	scanState->fdw_state = (void *) readState;
 }
 
@@ -2105,49 +2110,6 @@ CStoreIterateForeignScan(ForeignScanState *scanState)
 	return tupleSlot;
 }
 
-int callback(void *NotUsed, int argc, char **argv,
-             char **azColName)
-{
-
-  NotUsed = 0;
-
-  for (int i = 0; i < argc; i++)
-  {
-
-    printf("%s ", argv[i] ? argv[i] : "NULL");
-  }
-
-  printf("\n");
-
-  return 0;
-}
-
-void
-PrintTableFooter(int foreignTableId)
-{
-	sqlite3 *db;
-	char str[10];
-	char sql[100] = "SELECT fileOffset,skipListLength,dataLength,footerLength  FROM TABLEFOOTER WHERE relationID = ";
-	int db_exec;
-	char *err_msg;
-
-	db_exec = sqlite3_open("test.db", &db);
-
-	sprintf(str, "%d", foreignTableId);
-	strcat(sql, str);
-	strcat(sql, ";");
-
-	db_exec = sqlite3_exec(db, sql, callback, 0, &err_msg);
-
-	if (db_exec != SQLITE_OK)
-	{
-		printf("Cannot open database: %s\n", sqlite3_errmsg(db));
-		sqlite3_close(db);
-	}
-
-	sqlite3_close(db);  
-}
-
 /* CStoreEndForeignScan finishes scanning the foreign table. */
 static void
 CStoreEndForeignScan(ForeignScanState *scanState)
@@ -2158,7 +2120,7 @@ CStoreEndForeignScan(ForeignScanState *scanState)
 	if (readState != NULL)
 	{
 		CStoreEndRead(readState);
-		PrintTableFooter(foreignTableId);
+
         UpdateSelectCount(foreignTableId);
 	}
 }
@@ -2445,52 +2407,6 @@ CStoreBeginForeignModify(ModifyTableState *modifyTableState,
 	CStoreBeginForeignInsert(modifyTableState, relationInfo);
 }
 
-
-void 
-UpdateTableFooter(int foreignTableOid, TableFooter *tableFooter)
-{
-	sqlite3 *db;
-	int db_exec;
-	char *err_msg = 0;
-	ListCell *stripeMetadataCell = NULL;
-    List *stripeMetadataList = tableFooter->stripeMetadataList;
-
-    sqlite3_open("test.db", &db);
-
-	foreach(stripeMetadataCell, stripeMetadataList)
-	{
-		char str[10];
-	    char sql[100] = "INSERT INTO TableFooter VALUES(";
-		StripeMetadata *stripeMetadata = lfirst(stripeMetadataCell);
-
-		sprintf(str, "%d", foreignTableOid);
-	    strcat(sql, str);
-        strcat(sql, ",");
-	    sprintf(str, "%ld", stripeMetadata->fileOffset);
-        strcat(sql, str);
-        strcat(sql, ",");
-        sprintf(str, "%ld", stripeMetadata->skipListLength);
-        strcat(sql, str);
-        strcat(sql, ",");
-        sprintf(str, "%ld", stripeMetadata->dataLength);
-        strcat(sql, str);
-        strcat(sql, ",");
-        sprintf(str, "%ld", stripeMetadata->footerLength);
-        strcat(sql, str); 
-		strcat(sql, ");");
-
-		db_exec = sqlite3_exec(db, sql, 0, 0, &err_msg);
-
-	    if (db_exec != SQLITE_OK)
-	    {
-		  printf("Cannot open database: %s\n", sqlite3_errmsg(db));
-		  sqlite3_close(db);
-	    }
-	}
-
-	sqlite3_close(db);
-}
-
 void UpdateInsertCount(int foreignTableId)
 {
     sqlite3 *db;
@@ -2602,9 +2518,8 @@ CStoreEndForeignInsert(EState *executorState, ResultRelInfo *relationInfo)
 	if (writeState != NULL)
 	{
 		Relation relation = writeState->relation;
-		CStoreEndWrite(writeState);
+		CStoreEndWrite(writeState,foreignTableOid);
 		UpdateInsertCount(foreignTableOid);
-    	UpdateTableFooter(foreignTableOid, writeState->tableFooter);
 		heap_close(relation, ShareUpdateExclusiveLock);
 	}
 }
