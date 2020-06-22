@@ -102,7 +102,7 @@ ReadTableFooter(int foreignTableId)
     sqlite3_stmt *res;
 	TableFooter *tableFooter = NULL;
 	List *stripeMetadataList = NIL;
-	int temp;
+	int tempBlockRowCount;
 
 	sqlite3_open("test.db", &db);
 
@@ -123,7 +123,7 @@ ReadTableFooter(int foreignTableId)
 		stripeMetadata->skipListLength = atoi(sqlite3_column_text(res, 1));
 		stripeMetadata->dataLength = atoi(sqlite3_column_text(res, 2));
 		stripeMetadata->footerLength = atoi(sqlite3_column_text(res,3));
-        temp  = atoi(sqlite3_column_text(res,4));
+        tempBlockRowCount  = atoi(sqlite3_column_text(res,4));
 		stripeMetadataList = lappend(stripeMetadataList, stripeMetadata);
     } 
 
@@ -138,7 +138,7 @@ ReadTableFooter(int foreignTableId)
 	sqlite3_close(db); 
 	tableFooter = palloc0(sizeof(TableFooter));
 	tableFooter->stripeMetadataList = stripeMetadataList;
-	tableFooter->blockRowCount = temp;
+	tableFooter->blockRowCount = tempBlockRowCount;
 	return tableFooter;
 }
 
