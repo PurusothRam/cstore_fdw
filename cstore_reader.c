@@ -93,55 +93,55 @@ static void ResetUncompressedBlockData(ColumnBlockData **blockDataArray,
 static uint64 StripeRowCount(FILE *tableFile, StripeMetadata *stripeMetadata);
 TableFooter *ReadTableFooter(int foreignTableId);
 
+
 TableFooter *
 ReadTableFooter(int foreignTableId)
 {
-	sqlite3 *db;
-	char sql[150] = "SELECT fileOffset,skipListLength,dataLength,footerLength,blockRowCount FROM TABLEFOOTER WHERE relationID = ?";
-	int db_exec;
-    sqlite3_stmt *res;
-	TableFooter *tableFooter = NULL;
-	List *stripeMetadataList = NIL;
-	int tempBlockRowCount;
+  sqlite3 *db = OpenSQLiteConnection();
+  char sql[100] = METADATAQUERY;
+  int db_exec;
+  sqlite3_stmt *res;
+  TableFooter *tableFooter = NULL;
+  List *stripeMetadataList = NIL;
+  int tempBlockRowCount;
 
-	sqlite3_open("test.db", &db);
+  db_exec = sqlite3_prepare_v2(db, sql, -1, &res, 0);
 
-	db_exec = sqlite3_prepare_v2(db, sql, -1, &res, 0);
+  if (db_exec == SQLITE_OK)
+  {
+    sqlite3_bind_int(res, 1, foreignTableId);
+  }
 
-	if (db_exec == SQLITE_OK) {
-        sqlite3_bind_int(res, 1, foreignTableId);
-    } else {  
-        printf("Failed to execute statement: %s\n", sqlite3_errmsg(db));
+  for (;;)
+  {
+    int step = sqlite3_step(res);
+
+    if (step == SQLITE_ROW)
+    {
+      StripeMetadata *stripeMetadata = NULL;
+
+      stripeMetadata = palloc0(sizeof(StripeMetadata));
+      stripeMetadata->fileOffset = atoi(sqlite3_column_text(res, 0));
+      stripeMetadata->skipListLength = atoi(sqlite3_column_text(res, 1));
+      stripeMetadata->dataLength = atoi(sqlite3_column_text(res, 2));
+      stripeMetadata->footerLength = atoi(sqlite3_column_text(res, 3));
+      tempBlockRowCount = atoi(sqlite3_column_text(res, 4));
+      stripeMetadataList = lappend(stripeMetadataList, stripeMetadata);
     }
-    
-	int step = sqlite3_step(res); 
-    if (step == SQLITE_ROW) {
-	    StripeMetadata *stripeMetadata = NULL;
+    else
+    {
+      break;
+    }
+  }
 
-		stripeMetadata = palloc0(sizeof(StripeMetadata));
-		stripeMetadata->fileOffset = atoi(sqlite3_column_text(res, 0));
-		stripeMetadata->skipListLength = atoi(sqlite3_column_text(res, 1));
-		stripeMetadata->dataLength = atoi(sqlite3_column_text(res, 2));
-		stripeMetadata->footerLength = atoi(sqlite3_column_text(res,3));
-        tempBlockRowCount  = atoi(sqlite3_column_text(res,4));
-		stripeMetadataList = lappend(stripeMetadataList, stripeMetadata);
-    } 
+  sqlite3_finalize(res);
+  sqlite3_close(db);
 
-    sqlite3_finalize(res);
-
-	if (db_exec != SQLITE_OK)
-	{
-		printf("Cannot open database: %s\n", sqlite3_errmsg(db));
-		sqlite3_close(db);
-	}
-
-	sqlite3_close(db); 
-	tableFooter = palloc0(sizeof(TableFooter));
-	tableFooter->stripeMetadataList = stripeMetadataList;
-	tableFooter->blockRowCount = tempBlockRowCount;
-	return tableFooter;
+  tableFooter = palloc0(sizeof(TableFooter));
+  tableFooter->stripeMetadataList = stripeMetadataList;
+  tableFooter->blockRowCount = tempBlockRowCount;
+  return tableFooter;
 }
-
 /*
  * CStoreBeginRead initializes a cstore read operation. This function returns a
  * read handle that's used during reading rows and finishing the read operation.

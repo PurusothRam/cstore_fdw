@@ -155,7 +155,7 @@ static TupleTableSlot * CStoreExecForeignInsert(EState *executorState,
 												TupleTableSlot *planSlot);
 static void CStoreEndForeignModify(EState *executorState, ResultRelInfo *relationInfo);
 static void CStoreEndForeignInsert(EState *executorState, ResultRelInfo *relationInfo);
-void OpenSQLiteConnection();
+void CreateSQLiteTable();
 void InsertRelationId(int relationId);
 void UpdateSelectCount(int foreignTableId);
 void UpdateInsertCount(int foreignTableId);
@@ -202,13 +202,11 @@ void _PG_fini(void)
 
 void InsertRelationId(int relationId)
 {
-	sqlite3 *db;
+	sqlite3 *db = OpenSQLiteConnection();;
 	int db_exec;
 	char *err_msg = 0;
 	char str[10];
 	char sql[100] = "INSERT INTO Counter VALUES(";
-
-	db_exec = sqlite3_open("test.db", &db);
 
 	sprintf(str, "%d", relationId);
 	strcat(sql, str);
@@ -1145,27 +1143,30 @@ DirectoryExists(StringInfo directoryName)
 }
 
 
-void OpenSQLiteConnection()
+sqlite3 *OpenSQLiteConnection()
 {
 	sqlite3 *db;
 	int result;
-	char *sql;
-	char *err_msg = 0;
 
-	result = sqlite3_open("test.db", &db);
+    StringInfo sqliteDatabasePath = makeStringInfo();
 
-	sql = "DROP TABLE IF EXISTS Counter;"
-		  "CREATE TABLE Counter(relationID  INT,"
-		  "insertQuery INT,"
-		  "selectQuery  INT)";
-
-	result = sqlite3_exec(db, sql, 0, 0, &err_msg);
+	appendStringInfo(sqliteDatabasePath, "%s/%s/%s", DataDir, CSTORE_FDW_NAME,SQLITEDBNAME);
+	result = sqlite3_open(sqliteDatabasePath->data, &db);
 
 	if (result != SQLITE_OK)
 	{
 		printf("Cannot open database: %s\n", sqlite3_errmsg(db));
 		sqlite3_close(db);
 	}
+	return db;
+}
+
+void CreateSQLiteTable()
+{
+	sqlite3 *db  = OpenSQLiteConnection();
+	int result;
+	char *sql;
+	char *err_msg = 0;
 
 	sql = "DROP TABLE IF EXISTS TableFooter;"
           "CREATE TABLE TableFooter(relationID  BIG INT,"
@@ -1179,7 +1180,20 @@ void OpenSQLiteConnection()
 
 	if (result != SQLITE_OK)
 	{
-		printf("Cannot open at open database: %s\n", sqlite3_errmsg(db));
+		printf("Cannot open database: %s\n", sqlite3_errmsg(db));
+		sqlite3_close(db);
+	}
+
+	sql = "DROP TABLE IF EXISTS Counter;"
+		  "CREATE TABLE Counter(relationID  INT,"
+		  "insertQuery INT,"
+		  "selectQuery  INT)";
+
+	result = sqlite3_exec(db, sql, 0, 0, &err_msg);
+
+	if (result != SQLITE_OK)
+	{
+		printf("Cannot open database: %s\n", sqlite3_errmsg(db));
 		sqlite3_close(db);
 	}
 	sqlite3_close(db);
@@ -1194,7 +1208,7 @@ CreateDirectory(StringInfo directoryName)
 {
 	int makeOK = mkdir(directoryName->data, S_IRWXU);
 
-	OpenSQLiteConnection();
+	CreateSQLiteTable();
 
 	if (makeOK != 0)
 	{
@@ -2020,29 +2034,26 @@ CStoreExplainForeignScan(ForeignScanState *scanState, ExplainState *explainState
 
 void UpdateSelectCount(int foreignTableId)
 {
-	sqlite3 *db;
-	char str[10];
-	char sql[100] = "UPDATE Counter SET selectQuery = selectQuery + 1 WHERE relationID = ";
-	int db_exec;
-	char *err_msg;
+  sqlite3 *db= OpenSQLiteConnection();
+  char str[10];
+  char sql[100] = "UPDATE Counter SET selectQuery = selectQuery + 1 WHERE relationID = ";
+  int db_exec;
+  char *err_msg;
 
-	db_exec = sqlite3_open("test.db", &db);
+  sprintf(str, "%d", foreignTableId);
+  strcat(sql, str);
+  strcat(sql, ";");
 
-	sprintf(str, "%d", foreignTableId);
-	strcat(sql, str);
-	strcat(sql, ";");
+  db_exec = sqlite3_exec(db, sql, 0, 0, &err_msg);
 
-	db_exec = sqlite3_exec(db, sql, 0, 0, &err_msg);
+  if (db_exec != SQLITE_OK)
+  {
+    printf("Cannot open database: %s\n", sqlite3_errmsg(db));
+    sqlite3_close(db);
+  }
 
-	if (db_exec != SQLITE_OK)
-	{
-		printf("Cannot open database: %s\n", sqlite3_errmsg(db));
-		sqlite3_close(db);
-	}
-
-	sqlite3_close(db);
+  sqlite3_close(db);
 }
-
 
 /* CStoreBeginForeignScan starts reading the underlying cstore file. */
 static void
@@ -2120,7 +2131,6 @@ CStoreEndForeignScan(ForeignScanState *scanState)
 	if (readState != NULL)
 	{
 		CStoreEndRead(readState);
-
         UpdateSelectCount(foreignTableId);
 	}
 }
@@ -2416,7 +2426,7 @@ void UpdateInsertCount(int foreignTableId)
 	int db_exec;
 	char *err_msg;
 
-	db_exec = sqlite3_open("test.db", &db);
+	db = OpenSQLiteConnection();
 
 	sprintf(str, "%d", foreignTableId);
 	strcat(sql, str);

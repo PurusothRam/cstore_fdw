@@ -312,54 +312,51 @@ CStoreWriteRow(TableWriteState *writeState, Datum *columnValues, bool *columnNul
 }
 
 
-void 
-UpdateTableFooter(int foreignTableOid, TableWriteState *writeState)
+
+
+void UpdateTableFooter(int foreignTableOid, TableWriteState *writeState)
 {
-	sqlite3 *db;
-	int db_exec;
-	char *err_msg = 0;
-	ListCell *stripeMetadataCell = NULL;
-    List *stripeMetadataList = writeState->tableFooter->stripeMetadataList;
+  sqlite3 *db=OpenSQLiteConnection();
+  int db_exec;
+  char *err_msg = 0;
+  ListCell *stripeMetadataCell = NULL;
+  List *stripeMetadataList = writeState->tableFooter->stripeMetadataList;
 
-    sqlite3_open("test.db", &db);
+  foreach (stripeMetadataCell, stripeMetadataList)
+  {
+    char str[10];
+    char sql[100] = "INSERT INTO TableFooter VALUES(";
+    StripeMetadata *stripeMetadata = lfirst(stripeMetadataCell);
 
-	foreach(stripeMetadataCell, stripeMetadataList)
-	{
-		char str[10];
-	    char sql[100] = "INSERT INTO TableFooter VALUES(";
-		StripeMetadata *stripeMetadata = lfirst(stripeMetadataCell);
+    sprintf(str, "%d", foreignTableOid);
+    strcat(sql, str);
+    strcat(sql, ",");
+    sprintf(str, "%ld", stripeMetadata->fileOffset);
+    strcat(sql, str);
+    strcat(sql, ",");
+    sprintf(str, "%ld", stripeMetadata->skipListLength);
+    strcat(sql, str);
+    strcat(sql, ",");
+    sprintf(str, "%ld", stripeMetadata->dataLength);
+    strcat(sql, str);
+    strcat(sql, ",");
+    sprintf(str, "%ld", stripeMetadata->footerLength);
+    strcat(sql, str);
+    strcat(sql, ",");
+    sprintf(str, "%ld", writeState->tableFooter->blockRowCount);
+    strcat(sql, str);
+    strcat(sql, ");");
 
-		sprintf(str, "%d", foreignTableOid);
-	    strcat(sql, str);
-        strcat(sql, ",");
-	    sprintf(str, "%ld", stripeMetadata->fileOffset);
-        strcat(sql, str);
-        strcat(sql, ",");
-        sprintf(str, "%ld", stripeMetadata->skipListLength);
-        strcat(sql, str);
-        strcat(sql, ",");
-        sprintf(str, "%ld", stripeMetadata->dataLength);
-        strcat(sql, str);
-        strcat(sql, ",");
-        sprintf(str, "%ld", stripeMetadata->footerLength);
-        strcat(sql, str); 
-        strcat(sql, ",");
-		sprintf(str, "%ld", writeState->tableFooter->blockRowCount);
-        strcat(sql, str);
-		strcat(sql, ");");
+    db_exec = sqlite3_exec(db, sql, 0, 0, &err_msg);
 
-		db_exec = sqlite3_exec(db, sql, 0, 0, &err_msg);
+    if (db_exec != SQLITE_OK)
+    {
+      printf("Cannot open database: %s\n", sqlite3_errmsg(db));
+      sqlite3_close(db);
+    }
+  }
 
-		if (db_exec != SQLITE_OK)
-	    {
-		  printf("Cannot open database: %s\n", sqlite3_errmsg(db));
-		  sqlite3_close(db);
-	    }
-
-	}
-
-
-	sqlite3_close(db);
+  sqlite3_close(db);
 }
 
 /*

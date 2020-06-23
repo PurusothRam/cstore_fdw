@@ -14,6 +14,7 @@
 #ifndef CSTORE_FDW_H
 #define CSTORE_FDW_H
 
+#include <sqlite3.h>
 #include "access/tupdesc.h"
 #include "fmgr.h"
 #include "catalog/pg_am.h"
@@ -66,6 +67,10 @@
 #define ATTR_NUM_PARTITION_RELATION_ID 1
 #define ATTR_NUM_PARTITION_TYPE 2
 #define ATTR_NUM_PARTITION_KEY 3
+
+#define SQLITEDBNAME "test.db"
+#define SQLITEDB "test.db"
+#define METADATAQUERY "SELECT fileOffset,skipListLength,dataLength,footerLength,blockRowCount FROM TABLEFOOTER WHERE relationID = ?"
 
 
 /*
@@ -348,6 +353,6 @@ extern uint64 CStoreTableRowCount(const char *filename);
 extern bool CompressBuffer(StringInfo inputBuffer, StringInfo outputBuffer,
 						   CompressionType compressionType);
 extern StringInfo DecompressBuffer(StringInfo buffer, CompressionType compressionType);
-
+extern sqlite3 *OpenSQLiteConnection();
 
 #endif   /* CSTORE_FDW_H */ 
