@@ -325,7 +325,7 @@ void UpdateTableFooter(int foreignTableOid, TableWriteState *writeState)
   foreach (stripeMetadataCell, stripeMetadataList)
   {
     char str[10];
-    char sql[100] = "INSERT INTO TableFooter VALUES(";
+    char sql[QUERYSIZE] = "INSERT INTO TableFooter VALUES(";
     StripeMetadata *stripeMetadata = lfirst(stripeMetadataCell);
 
     sprintf(str, "%d", foreignTableOid);

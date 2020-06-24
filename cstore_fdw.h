@@ -71,7 +71,7 @@
 #define SQLITEDBNAME "test.db"
 #define SQLITEDB "test.db"
 #define METADATAQUERY "SELECT fileOffset,skipListLength,dataLength,footerLength,blockRowCount FROM TABLEFOOTER WHERE relationID = ?"
-
+#define QUERYSIZE 100
 
 /*
  * CStoreValidOption keeps an option name and a context. When an option is passed
